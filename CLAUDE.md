@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `npm run dev` - Start development server on port 3000
 - `npm run test` - Run Vitest unit tests
+- `npm run test -- path/to/file.test.ts` - Run a single test file
+- `npm run test -- --watch` - Run tests in watch mode
 - `npm run validate` - Run all tests, linting, and typecheck (use before commits)
 
 ### Code Quality
@@ -23,23 +25,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run setup` - Generate Prisma client and deploy migrations
 - `npm run db:generate-type` - Generate Prisma client after schema changes
 - `npm run db:prepare-migration` - Create new database migration
+- `npm run db:deploy` - Deploy pending migrations to database
 
 ### Build & Production
 
 - `npm run build` - Build for **production**
 - `npm run start` - Start production server
 
+### E2E Testing (Playwright)
+
+- `npm run test:e2e:install` - Install Playwright browsers
+- `npm run test:e2e:dev` - Run E2E tests with UI mode
+- `npm run test:e2e:run` - Run E2E tests headless
+
 ## Architecture Overview
 
-**Shelf.nu** is an asset management platform built with Remix, React, TypeScript, and PostgreSQL.
+**Shelf.nu** is an asset management platform built with React Router v7 (migrated from Remix), React, TypeScript, and PostgreSQL.
+
+**Requirements:** Node.js v22.20.0 or higher (see `engines` in package.json).
 
 ### Core Technologies
 
-- **Remix** - Full-stack React framework with file-based routing
+- **React Router v7** - Full-stack React framework with file-based routing (migrated from Remix)
+- **React 19** - Latest React version with concurrent features
 - **Prisma** - Database ORM with PostgreSQL
 - **Supabase** - Authentication, storage, and database hosting
 - **Tailwind CSS + Radix UI** - Styling and UI components
 - **Jotai** - Atomic state management
+- **Hono** - Server middleware via react-router-hono-server
 
 ### Key Directory Structure
 
@@ -90,6 +103,32 @@ app/
 - **Multi-tenancy**: Organization-based data isolation
 - **Authentication**: Supabase Auth with SSO support
 
+### Error Handling Pattern
+
+Follow the consistent error handling pattern used throughout the codebase:
+
+**In Routes (loaders/actions):**
+```typescript
+export async function loader({ request }: LoaderFunctionArgs) {
+  try {
+    // Business logic
+    return payload({ data });
+  } catch (cause) {
+    const reason = makeShelfError(cause);
+    throw data(error(reason), { status: reason.status });
+  }
+}
+```
+
+**In Services:**
+- Always throw `ShelfError`, never `Response` objects
+- Use `try/catch` blocks with meaningful error messages
+- Include `additionalData` for debugging context
+
+**Key utilities:** `ShelfError`, `makeShelfError()`, `payload()`, `error()`, `parseData()`
+
+See [docs/handling-errors.md](./docs/handling-errors.md) for complete documentation.
+
 ### Bulk Operations & Select All Pattern
 
 When implementing bulk operations that work across multiple pages of filtered data, follow the **ALL_SELECTED_KEY pattern**:
@@ -119,19 +158,19 @@ When implementing bulk operations that work across multiple pages of filtered da
 
 ### Unit Tests (Vitest)
 
-- Tests co-located with source files
+- Tests co-located with source files (e.g., `service.server.test.ts` next to `service.server.ts`)
 - Happy DOM environment for React component testing
 - Run with `npm run test` or `npm run test:cov` for coverage
 
+### E2E Tests (Playwright)
+
+- Located in `test/e2e/` directory
+- Requires app running on localhost:3000
+- Run `npm run test:e2e:install` first to install browsers
+
 ### Validation Pipeline
 
-Always run `npm run validate` before committing - this runs:
-
-1. Prisma type generation
-2. ESLint with auto-fix
-3. Prettier formatting
-4. TypeScript checking
-5. Unit tests
+Always run `npm run validate` before committing - this runs tests, linting, and typecheck in parallel.
 
 ### Writing & Organizing Tests
 
@@ -180,13 +219,12 @@ mocks/                      # MSW API handlers (kept at root)
 └── index.ts
 ```
 
-#### Path Aliases (Configured)
+#### Path Aliases
 
-Path aliases are configured in `vitest.config.ts` for easy imports:
+Path aliases are configured via `tsconfig.json` and resolved by `vite-tsconfig-paths`:
 
 ```typescript
-import { createUser } from "@factories"; // → test/factories/index.ts
-import { createRemixMocks } from "@mocks/remix"; // → test/mocks/remix.tsx
+import { something } from "~/utils/something"; // → app/utils/something.ts
 ```
 
 #### Factories & Test Data
@@ -198,20 +236,14 @@ import { createRemixMocks } from "@mocks/remix"; // → test/mocks/remix.tsx
 Example factory usage:
 
 ```typescript
-import { userFactory } from "@factories/userFactory";
+import { faker } from "@faker-js/faker";
 
-const testUser = userFactory.build({ role: "admin" });
+const testUser = {
+  id: faker.string.uuid(),
+  email: faker.internet.email(),
+  firstName: faker.person.firstName(),
+};
 ```
-
-#### Pre-Commit Checklist
-
-Before committing tests:
-
-- Ensure tests are behavior-driven and do not rely heavily on implementation details.
-- Confirm mocks have `// why:` comments explaining their necessity.
-- Verify tests run quickly and reliably without flaky behavior.
-- Check that test data is generated via factories or well-structured mocks.
-- Review test readability and maintainability.
 
 ## Environment Configuration
 
@@ -249,86 +281,19 @@ Before committing tests:
 - add and commit automatically whenever a task is finished
 - Always use Conventional Commits spec when making commits and opening PRs: https://www.conventionalcommits.org/en/v1.0.0/
 - use descriptive commit messages that capture the full scope of the changes
-- **IMPORTANT: Each line in the commit message body must be ≤ 100 characters**
+- **IMPORTANT: Commit message lines must be ≤ 100 characters**
+  - Both subject line (header) and body lines are limited to 100 characters
   - Wrap long lines to stay within the limit
   - This is enforced by commitlint pre-commit hook
-  - Subject line can be longer, only body lines are restricted
 - dont add 🤖 Generated with [Claude Code](https://claude.ai code) & Co-Authored-By: Claude <noreply@anthropic.com>" because it clutters the commits
 - Include test readability and mock discipline in PR reviews. Overly mocked or verbose tests should be refactored before merge.
 
-## Rule Improvement Triggers
+## Maintaining This Document
 
-- New code patterns not covered by existing rules
-- Repeated similar implementations across files
-- Common error patterns that could be prevented
-- New libraries or tools being used consistently
-- Emerging best practices in the codebase
+Update CLAUDE.md when:
+- New patterns are used consistently across 3+ files
+- Common bugs could be prevented by documented rules
+- Code reviews repeatedly mention the same feedback
+- Libraries or architectural patterns change
 
-# Analysis Process:
-
-- Compare new code with existing rules
-- Identify patterns that should be standardized
-- Look for references to external documentation
-- Check for consistent error handling patterns
-- Monitor test patterns and coverage
-
-# Rule Updates:
-
-- **Add New Rules When:**
-
-  - A new technology/pattern is used in 3+ files
-  - Common bugs could be prevented by a rule
-  - Code reviews repeatedly mention the same feedback
-  - New security or performance patterns emerge
-
-- **Modify Existing Rules When:**
-
-  - Better examples exist in the codebase
-  - Additional edge cases are discovered
-  - Related rules have been updated
-  - Implementation details have changed
-
-- **Example Pattern Recognition:**
-
-  ```typescript
-  // If you see repeated patterns like:
-  const data = await prisma.user.findMany({
-    select: { id: true, email: true },
-    where: { status: "ACTIVE" },
-  });
-
-  // Consider adding to the files
-  // - Standard select fields
-  // - Common where conditions
-  // - Performance optimization patterns
-  ```
-
-- **Rule Quality Checks:**
-- Rules should be actionable and specific
-- Examples should come from actual code
-- References should be up to date
-- Patterns should be consistently enforced
-
-## Continuous Improvement:
-
-- Monitor code review comments
-- Track common development questions
-- Update rules after major refactors
-- Add links to relevant documentation
-- Cross-reference related rules
-
-## Rule Deprecation
-
-- Mark outdated patterns as deprecated
-- Remove rules that no longer apply
-- Update references to deprecated rules
-- Document migration paths for old patterns
-
-## Documentation Updates:
-
-- Keep examples synchronized with code
-- Update references to external docs
-- Maintain links between related rules
-- Document breaking changes
-
-- When you write any knowledgebase articles or documentation always provide the content in markdown
+Keep rules actionable, examples from actual code, and references up to date.
